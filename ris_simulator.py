@@ -48,7 +48,7 @@ def pq_loss(bits):
     if bits==0:return 1.0
     return np.sinc(1.0/2**bits)**2
 
-def compute(ptx,fghz,bw_mhz,alt,el,gtx,grx,nf,nris,espac,eta,pbits,kric,rr,perr,rdist):
+def compute(ptx,fghz,bw_mhz,alt,el,gtx,grx,nf,nris,espac,eta,pbits,kric,rr,perr,rdist,**kwargs):
     f=fghz*1e9;lam=C/f;d=slant_range(alt,el)
     Lfs=20*np.log10(4*np.pi*d*f/C)
     Latm=0.5/np.sin(np.deg2rad(max(el,1)))
@@ -91,11 +91,11 @@ class FS(QWidget):
     def value(s):return s.b.value()
 
 class IS(QWidget):
-    def __init__(s,lab,lo,hi,v,cb=None):
+    def __init__(s,lab,lo,hi,v,st=1,cb=None):
         super().__init__();s.setFixedHeight(26)
         r=QHBoxLayout(s);r.setContentsMargins(0,0,0,0);r.setSpacing(4)
         r.addWidget(_lb(lab,11,DM));r.addStretch()
-        s.b=QSpinBox();s.b.setRange(lo,hi);s.b.setValue(v)
+        s.b=QSpinBox();s.b.setRange(lo,hi);s.b.setValue(v);s.b.setSingleStep(st)
         s.b.setAlignment(Qt.AlignmentFlag.AlignRight);r.addWidget(s.b)
         if cb:s.b.valueChanged.connect(cb)
     def value(s):return s.b.value()
@@ -177,13 +177,14 @@ def draw_bars(ax,r):
     if r is None:
         ax.text(.5,.5,"Adjust parameters — auto-updates",transform=ax.transAxes,ha="center",va="center",color=DM,fontsize=13,style="italic");return
     pno=r["pno"];pw=r["pw"]
-    xmin=min(pno,pw)-10;xmax=max(pno,pw)+35
+    xmin=-140;xmax=-20
     y=[1,0];vals=[pno,pw]
-    ax.barh(y,[v-xmin for v in vals],left=xmin,height=.4,color=[RD,BL],alpha=.82,zorder=5)
-    ax.text(pno+1,1,f"  {pno:.1f} dBm  (SNR {r['snr_no']:.1f} dB)",va="center",ha="left",fontsize=10,fontweight="bold",color=RD,zorder=6)
-    ax.text(pw+1,0,f"  {pw:.1f} dBm  (SNR {r['snr_w']:.1f} dB)",va="center",ha="left",fontsize=10,fontweight="bold",color=BL,zorder=6)
+    widths=[max(v-xmin,0) for v in vals]
+    ax.barh(y,widths,left=xmin,height=.4,color=[RD,BL],alpha=.82,zorder=5)
+    ax.text(pno+1,1,f"  {pno:.2f} dBm  (SNR {r['snr_no']:.1f} dB)",va="center",ha="left",fontsize=10,fontweight="bold",color=RD,zorder=6)
+    ax.text(pw+1,0,f"  {pw:.2f} dBm  (SNR {r['snr_w']:.1f} dB)",va="center",ha="left",fontsize=10,fontweight="bold",color=BL,zorder=6)
     mx=max(pno,pw)
-    ax.text(mx+1,.5,f"  ▲ +{r['gain']:.1f} dB gain",va="center",ha="left",fontsize=11,fontweight="bold",color=GN,zorder=6,bbox=dict(fc="#f0fdf4",ec=GN,alpha=.9,pad=3,boxstyle="round,pad=0.3"))
+    ax.text(mx+1,.5,f"  ▲ +{r['gain']:.2f} dB gain",va="center",ha="left",fontsize=11,fontweight="bold",color=GN,zorder=6,bbox=dict(fc="#f0fdf4",ec=GN,alpha=.9,pad=3,boxstyle="round,pad=0.3"))
     ax.set_yticks(y);ax.set_yticklabels(["Without RIS","With RIS"],fontsize=10,fontweight="600")
     ax.set_xlim(xmin,xmax);ax.set_xlabel("Received Power (dBm)",fontsize=10,color=DM)
     ax.grid(True,axis="x",color="#e5e5ea",lw=.7,ls="--");ax.set_axisbelow(True)
@@ -202,41 +203,14 @@ class Win(QMainWindow):
         side=QWidget();sl=QVBoxLayout(side);sl.setContentsMargins(12,10,12,10);sl.setSpacing(4)
         up=lambda _:s._au()
         sl.addWidget(_lb("Satellite Link Simulator",13,CY,True));sl.addWidget(_sep())
-        # Link
+        # Parameters
         sl.addWidget(_lb("▸ Link Parameters",10,DM,True))
         s.p_freq=FS("Carrier Freq (GHz)",.1,200,2,.5,1,up)
-        s.p_bw=FS("Bandwidth (MHz)",.1,5000,10,1,1,up)
-        s.p_ptx=FS("Tx Power (dBm)",0,60,33,1,1,up)
-        for w in[s.p_freq,s.p_bw,s.p_ptx]:sl.addWidget(w)
-        sl.addWidget(_sep())
-        # Antennas
-        sl.addWidget(_lb("▸ Antennas",10,DM,True))
-        s.p_gtx=FS("Tx Gain (dBi)",0,40,6,1,1,up)
-        s.p_grx=FS("Rx Gain (dBi)",0,40,10,1,1,up)
-        s.p_nf=FS("Noise Figure (dB)",0,15,3,.5,1,up)
-        for w in[s.p_gtx,s.p_grx,s.p_nf]:sl.addWidget(w)
-        sl.addWidget(_sep())
-        # Satellite
-        sl.addWidget(_lb("▸ Satellite Orbit",10,DM,True))
-        s.p_alt=FS("Altitude (km)",100,2000,550,50,0,up)
-        s.p_el=FS("Elevation Angle (°)",5,90,10,1,1,up)
-        for w in[s.p_alt,s.p_el]:sl.addWidget(w)
-        sl.addWidget(_sep())
-        # RIS
-        sl.addWidget(_lb("▸ RIS Configuration",10,DM,True))
-        s.p_nris=IS("Elements (N)",4,4096,100,up)
-        s.p_esp=FS("Spacing (λ)",.1,1,.5,.1,1,up)
-        s.p_eta=FS("Reflect. Efficiency (η)",.1,1,.9,.05,2,up)
-        s.p_pb=CB("Phase Bits",["∞ (cont.)","2-bit","4-bit"],0,up)
-        s.p_rdist=FS("RIS→GS Dist (m)",1,500,50,5,0,up)
-        for w in[s.p_nris,s.p_esp,s.p_eta,s.p_pb,s.p_rdist]:sl.addWidget(w)
-        sl.addWidget(_sep())
-        # Channel / Environment
-        sl.addWidget(_lb("▸ Channel & Environment",10,DM,True))
-        s.p_kric=FS("Rician K-factor (dB)",0,30,15,1,1,up)
-        s.p_rain=FS("Rain Rate (mm/h)",0,150,0,5,0,up)
-        s.p_perr=FS("Pointing Error (°)",0,10,0,.1,1,up)
-        for w in[s.p_kric,s.p_rain,s.p_perr]:sl.addWidget(w)
+        s.p_nris=IS("RIS Elements (N)",4,100000,1000,100,up)
+        s.p_alt=FS("Orbit Altitude (km)",100,2000,550,50,0,up)
+        s.p_ch=CB("Channel Model",["AWGN","Rayleigh","Rician"],2,up)
+        s.p_dop=FS("Doppler Range (kHz)",0,1000,30,10,0,up)
+        for w in [s.p_freq,s.p_nris,s.p_alt,s.p_ch,s.p_dop]:sl.addWidget(w)
         sl.addWidget(_sep())
         # Result cards
         s.c_no=Card("Rx Power — No RIS",RD)
@@ -263,21 +237,26 @@ class Win(QMainWindow):
 
     def _au(s):s._tm.start()
 
-    def _pb(s):
-        t=s.p_pb.text()
-        if "∞" in t:return 0
-        return int(t.split("-")[0])
-
     def _run(s):
-        r=compute(s.p_ptx.value(),s.p_freq.value(),s.p_bw.value(),
-                  s.p_alt.value(),s.p_el.value(),s.p_gtx.value(),s.p_grx.value(),
-                  s.p_nf.value(),s.p_nris.value(),s.p_esp.value(),s.p_eta.value(),
-                  s._pb(),s.p_kric.value(),s.p_rain.value(),s.p_perr.value(),
-                  s.p_rdist.value())
-        s.c_no.set(f"{r['pno']:.1f} dBm");s.c_w.set(f"{r['pw']:.1f} dBm")
-        s.c_g.set(f"+{r['gain']:.1f} dB");s.c_snr.set(f"+{r['snr_w']-r['snr_no']:.1f} dB")
+        ch = s.p_ch.text()
+        kric = 100 if ch == "AWGN" else (-100 if ch == "Rayleigh" else 15)
+        
+        f_hz = s.p_freq.value() * 1e9
+        vorb = np.sqrt(3.986e14 / ((6371 + s.p_alt.value()) * 1e3))
+        max_dop = f_hz * vorb / C
+        dop_in = s.p_dop.value() * 1e3
+        cos_el = np.clip(dop_in / max_dop, 0, 1) if max_dop > 0 else 1
+        el_calc = np.rad2deg(np.arccos(cos_el))
+        
+        r=compute(33, s.p_freq.value(), 10,
+                  s.p_alt.value(), el_calc, 6, 10,
+                  3, s.p_nris.value(), 0.5, 0.9,
+                  0, kric, 0, 0,
+                  5)
+        s.c_no.set(f"{r['pno']:.2f} dBm");s.c_w.set(f"{r['pw']:.2f} dBm")
+        s.c_g.set(f"+{r['gain']:.2f} dB");s.c_snr.set(f"+{r['snr_w']-r['snr_no']:.2f} dB")
         s.c_nf.set(f"{r['Nfl']:.1f} dBm");s.c_dop.set(f"{r['dop']/1e3:.1f} kHz")
-        draw_dia(s.axd,r,s.p_nris.value(),s.p_el.value(),s.p_alt.value())
+        draw_dia(s.axd,r,s.p_nris.value(),el_calc,s.p_alt.value())
         s.fdia.tight_layout();s.cvd.draw()
         draw_bars(s.axb,r);s.fbar.tight_layout();s.cvb.draw()
 

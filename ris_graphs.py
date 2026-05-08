@@ -39,7 +39,7 @@ def rain_atten(fg,rr,e):
     _a=[.97,1.07,1.12,1.33,1.26,1.15,1.10,1.06,1.02,.86,.74]
     return np.interp(fg,_f,_k)*rr**np.interp(fg,_f,_a)*3.0/np.sin(np.deg2rad(max(e,5)))
 def pql(b):return 1.0 if b==0 else np.sinc(1.0/2**b)**2
-def comp(ptx,fghz,bw,alt,el,gtx,grx,nf,nris,esp,eta,pb,kric,rr,pe,rd):
+def comp(ptx,fghz,bw,alt,el,gtx,grx,nf,nris,esp,eta,pb,kric,rr,pe,rd,**kwargs):
     f=fghz*1e9;lam=C/f;d=slant_range(alt,el)
     Lfs=20*np.log10(4*np.pi*d*f/C);La=0.5/np.sin(np.deg2rad(max(el,1)))
     Lr=rain_atten(fghz,rr,el) if rr>0 else 0;Nfl=-174+10*np.log10(bw*1e6)+nf
@@ -69,10 +69,10 @@ class FS(QWidget):
     def value(s):return s.b.value()
     def reset(s):s.b.blockSignals(True);s.b.setValue(s._df);s.b.blockSignals(False)
 class IS(QWidget):
-    def __init__(s,lab,lo,hi,v,cb=None):
+    def __init__(s,lab,lo,hi,v,st=1,cb=None):
         super().__init__();s.setFixedHeight(26);s._df=v;r=QHBoxLayout(s);r.setContentsMargins(0,0,0,0);r.setSpacing(4)
         r.addWidget(_lb(lab,11,DM));r.addStretch();s.b=QSpinBox()
-        s.b.setRange(lo,hi);s.b.setValue(v);s.b.setAlignment(Qt.AlignmentFlag.AlignRight);r.addWidget(s.b)
+        s.b.setRange(lo,hi);s.b.setValue(v);s.b.setSingleStep(st);s.b.setAlignment(Qt.AlignmentFlag.AlignRight);r.addWidget(s.b)
         if cb:s.b.valueChanged.connect(cb)
     def value(s):return s.b.value()
     def reset(s):s.b.blockSignals(True);s.b.setValue(s._df);s.b.blockSignals(False)
@@ -98,7 +98,7 @@ def g_ber(ax,P):
     ax.axvline(r['sno'],color=RD,ls=':',lw=1.2,alpha=.6)
     ax.axvline(r['sw'],color=CY,ls=':',lw=1.2,alpha=.6)
     ax.axhline(1e-3,color=AM,ls=':',lw=1);ax.text(24,1.5e-3,'BER=10⁻³',color=AM,fontsize=9,ha='right')
-    ax.set_xlim(-10,25);ax.set_ylim(1e-7,1)
+    ax.set_xlim(-20,35);ax.set_ylim(1e-6,1)
     ax.set_xlabel('SNR (dB)',fontsize=11);ax.set_ylabel('Bit Error Rate',fontsize=11)
     ax.set_title(f'BER vs SNR  (RIS gain ≈ {g:.1f} dB)',fontsize=13,fontweight='bold',color=TX,pad=10)
     ax.legend(fontsize=10,facecolor=CD,edgecolor=LN)
@@ -122,7 +122,7 @@ def g_pl(ax,P):
     ax.plot(fs,pw,color=CY,lw=2.2,label='Total loss (With RIS)')
     ax.fill_between(fs,pn,pw,color=CY,alpha=.08)
     ax.axvline(P['fghz'],color=AM,ls='--',lw=1.2,label=f"Current f={P['fghz']} GHz")
-    ax.set_xlim(0,100);ax.set_ylim(100,220)
+    ax.set_xlim(0,100);ax.set_ylim(100,240)
     ax.set_xlabel('Carrier Frequency (GHz)',fontsize=11);ax.set_ylabel('Effective Path Loss (dB)',fontsize=11)
     ax.set_title('Path Loss vs Frequency',fontsize=13,fontweight='bold',color=TX,pad=10)
     ax.legend(fontsize=10,facecolor=CD,edgecolor=LN,loc='upper left')
@@ -139,7 +139,7 @@ def g_dop(ax,P):
     ax2.set_ylim(0,100);ax2.spines['right'].set_color(AM)
     h1,l1=ax.get_legend_handles_labels();h2,l2=ax2.get_legend_handles_labels()
     ax.legend(h1+h2,l1+l2,fontsize=9,facecolor=CD,edgecolor=LN,loc='upper right')
-    ax.set_xlim(0,600);ax.set_ylim(0,None)
+    ax.set_xlim(0,600);ax.set_ylim(0, P.get('dop_range', 150))
     ax.set_xlabel('Time (s)',fontsize=11);ax.set_ylabel('Doppler Shift (kHz)',fontsize=11)
     ax.set_title('Doppler Shift During Satellite Pass',fontsize=13,fontweight='bold',color=TX,pad=10)
 def g_rain(ax,P):
@@ -172,34 +172,14 @@ class Win(QMainWindow):
         s.radios=[]
         for i,(nm,_) in enumerate(GRAPHS):
             rb=QRadioButton(nm);rb.setChecked(i==0);rb.toggled.connect(gswitch);s.radios.append(rb);sl.addWidget(rb)
-        sl.addWidget(_sep());sl.addWidget(_lb("▸ Link Parameters",10,DM,True))
+        sl.addWidget(_sep());sl.addWidget(_lb("▸ Parameters",10,DM,True))
         s.p_freq=FS("Carrier Freq (GHz)",.1,200,2,.5,1,up)
-        s.p_bw=FS("Bandwidth (MHz)",.1,5000,10,1,1,up)
-        s.p_ptx=FS("Tx Power (dBm)",0,60,33,1,1,up)
-        for w in[s.p_freq,s.p_bw,s.p_ptx]:sl.addWidget(w)
-        sl.addWidget(_sep());sl.addWidget(_lb("▸ Antennas",10,DM,True))
-        s.p_gtx=FS("Tx Gain (dBi)",0,40,6,1,1,up)
-        s.p_grx=FS("Rx Gain (dBi)",0,40,10,1,1,up)
-        s.p_nf=FS("Noise Figure (dB)",0,15,3,.5,1,up)
-        for w in[s.p_gtx,s.p_grx,s.p_nf]:sl.addWidget(w)
-        sl.addWidget(_sep());sl.addWidget(_lb("▸ Satellite Orbit",10,DM,True))
-        s.p_alt=FS("Altitude (km)",100,2000,550,50,0,up)
-        s.p_el=FS("Elevation Angle (°)",5,90,10,1,1,up)
-        for w in[s.p_alt,s.p_el]:sl.addWidget(w)
-        sl.addWidget(_sep());sl.addWidget(_lb("▸ RIS Configuration",10,DM,True))
-        s.p_nris=IS("Elements (N)",4,4096,100,up)
-        s.p_esp=FS("Spacing (λ)",.1,1,.5,.1,1,up)
-        s.p_eta=FS("Reflect. Efficiency (η)",.1,1,.9,.05,2,up)
-        s.p_pb=CB("Phase Bits",["∞ (cont.)","2-bit","4-bit"],0,up)
-        s.p_rd=FS("RIS→GS Dist (m)",1,500,50,5,0,up)
-        for w in[s.p_nris,s.p_esp,s.p_eta,s.p_pb,s.p_rd]:sl.addWidget(w)
-        sl.addWidget(_sep());sl.addWidget(_lb("▸ Channel & Environment",10,DM,True))
-        s.p_kric=FS("Rician K-factor (dB)",0,30,15,1,1,up)
-        s.p_rain=FS("Rain Rate (mm/h)",0,150,0,5,0,up)
-        s.p_perr=FS("Pointing Error (°)",0,10,0,.1,1,up)
-        for w in[s.p_kric,s.p_rain,s.p_perr]:sl.addWidget(w)
-        s._all_spins=[s.p_freq,s.p_bw,s.p_ptx,s.p_gtx,s.p_grx,s.p_nf,s.p_alt,s.p_el,
-                      s.p_nris,s.p_esp,s.p_eta,s.p_pb,s.p_rd,s.p_kric,s.p_rain,s.p_perr]
+        s.p_nris=IS("RIS Elements (N)",4,100000,1000,100,up)
+        s.p_alt=FS("Orbit Altitude (km)",100,2000,550,50,0,up)
+        s.p_ch=CB("Channel Model",["AWGN","Rayleigh","Rician"],2,up)
+        s.p_dop=FS("Doppler Range (kHz)",0,1000,30,10,0,up)
+        for w in [s.p_freq,s.p_nris,s.p_alt,s.p_ch,s.p_dop]:sl.addWidget(w)
+        s._all_spins=[s.p_freq,s.p_nris,s.p_alt,s.p_ch,s.p_dop]
         sl.addStretch();scroll.setWidget(side);ml.addWidget(scroll)
         right=QWidget();right.setStyleSheet(f"background:{CD};")
         rl=QVBoxLayout(right);rl.setContentsMargins(10,8,10,8)
@@ -215,13 +195,21 @@ class Win(QMainWindow):
             for w in s._all_spins:w.reset()
             s._prev_idx=idx
         s._tm.start()
-    def _pb(s):
-        t=s.p_pb.text();return 0 if "∞" in t else int(t.split("-")[0])
     def _P(s):
-        return dict(ptx=s.p_ptx.value(),fghz=s.p_freq.value(),bw=s.p_bw.value(),
-            alt=s.p_alt.value(),el=s.p_el.value(),gtx=s.p_gtx.value(),grx=s.p_grx.value(),
-            nf=s.p_nf.value(),nris=s.p_nris.value(),esp=s.p_esp.value(),eta=s.p_eta.value(),
-            pb=s._pb(),kric=s.p_kric.value(),rr=s.p_rain.value(),pe=s.p_perr.value(),rd=s.p_rd.value())
+        ch = s.p_ch.text()
+        kric = 100 if ch == "AWGN" else (-100 if ch == "Rayleigh" else 15)
+        
+        f_hz = s.p_freq.value() * 1e9
+        vorb = np.sqrt(3.986e14 / ((6371 + s.p_alt.value()) * 1e3))
+        max_dop = f_hz * vorb / C
+        dop_in = s.p_dop.value() * 1e3
+        cos_el = np.clip(dop_in / max_dop, 0, 1) if max_dop > 0 else 1
+        el_calc = np.rad2deg(np.arccos(cos_el))
+
+        return dict(ptx=33, fghz=s.p_freq.value(), bw=10,
+            alt=s.p_alt.value(), el=el_calc, gtx=6, grx=10,
+            nf=3, nris=s.p_nris.value(), esp=0.5, eta=0.9,
+            pb=0, kric=kric, rr=0, pe=0, rd=5, dop_range=s.p_dop.value())
     def _run(s):
         idx=next((i for i,r in enumerate(s.radios) if r.isChecked()),0)
         s._prev_idx=idx;GRAPHS[idx][1](s.ax,s._P());s.fig.tight_layout();s.cv.draw()
